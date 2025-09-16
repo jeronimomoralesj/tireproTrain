@@ -11,11 +11,6 @@ type TirePayload = {
   }[];
 };
 
-type TireWithS3Urls = {
-  images: (string | null)[];
-  depths: string[];
-};
-
 // 1️⃣ Setup AWS S3 client
 const s3 = new S3Client({
   region: process.env.AWS_REGION!,
@@ -31,7 +26,7 @@ export async function POST(req: Request) {
     const { plate, tires } = body;
 
     // 2️⃣ Upload each image to S3 and replace with URL
-    const tiresWithS3Urls: TireWithS3Urls[] = await Promise.all(
+    const tiresWithS3Urls = await Promise.all(
       tires.map(async (tire, tIndex) => {
         const s3Urls = await Promise.all(
           tire.images.map(async (imgBase64, imgIndex) => {
@@ -101,66 +96,61 @@ export async function POST(req: Request) {
 
 async function sendLowDepthEmail(
   plate: string,
-  tires: TireWithS3Urls[]
-): Promise<void> {
-  try {
-    const transporter = nodemailer.createTransporter({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+  tires: { images: (string | null)[]; depths: string[] }[]
+) {
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+  });
 
-    // Build HTML table with all tires
-    const tableRows = tires
-      .map(
-        (t, i) => `
-        <tr>
-          <td style="padding: 6px; border: 1px solid #ddd;">Tire ${i + 1}</td>
-          <td style="padding: 6px; border: 1px solid #ddd;">${t.depths.join(" mm, ")} mm</td>
-          <td style="padding: 6px; border: 1px solid #ddd;">
-            ${t.images
-              .map(
-                (img) =>
-                  img
-                    ? `<a href="${img}" target="_blank">Ver Imagen</a>`
-                    : "No image"
-              )
-              .join("<br/>")}
-          </td>
-        </tr>`
-      )
-      .join("");
+  // Build HTML table with all tires
+  const tableRows = tires
+    .map(
+      (t, i) => `
+      <tr>
+        <td style="padding: 6px; border: 1px solid #ddd;">Tire ${i + 1}</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">${t.depths.join(" mm, ")} mm</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">
+          ${t.images
+            .map(
+              (img) =>
+                img
+                  ? `<a href="${img}" target="_blank">Ver Imagen</a>`
+                  : "No image"
+            )
+            .join("<br/>")}
+        </td>
+      </tr>`
+    )
+    .join("");
 
-    const emailBody = `
-      <h2>🚨 Alerta de Profundidad Baja</h2>
-      <p><b>Placa:</b> ${plate}</p>
-      <table style="border-collapse: collapse; width: 100%; margin-top: 12px;">
-        <thead>
-          <tr style="background: #f0f0f0;">
-            <th style="padding: 6px; border: 1px solid #ddd;">Llanta</th>
-            <th style="padding: 6px; border: 1px solid #ddd;">Profundidades</th>
-            <th style="padding: 6px; border: 1px solid #ddd;">Imágenes</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${tableRows}
-        </tbody>
-      </table>
-      <p style="margin-top: 16px; font-size: 12px; color: #555;">
-        ⚠️ Esta alerta se genera porque al menos una de las profundidades es ≤ 5 mm.
-      </p>
-    `;
+  const emailBody = `
+    <h2>🚨 Alerta de Profundidad Baja</h2>
+    <p><b>Placa:</b> ${plate}</p>
+    <table style="border-collapse: collapse; width: 100%; margin-top: 12px;">
+      <thead>
+        <tr style="background: #f0f0f0;">
+          <th style="padding: 6px; border: 1px solid #ddd;">Llanta</th>
+          <th style="padding: 6px; border: 1px solid #ddd;">Profundidades</th>
+          <th style="padding: 6px; border: 1px solid #ddd;">Imágenes</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${tableRows}
+      </tbody>
+    </table>
+    <p style="margin-top: 16px; font-size: 12px; color: #555;">
+      ⚠️ Esta alerta se genera porque al menos una de las profundidades es ≤ 5 mm.
+    </p>
+  `;
 
-    await transporter.sendMail({
-      from: `"TirePro Alerts" <${process.env.EMAIL_USER}>`,
-      to: "moraljero1234567890@gmail.com",
-      subject: `🚨 Alerta de Profundidad Baja — Placa ${plate}`,
-      html: emailBody,
-    });
-  } catch (error) {
-    console.error("Error sending email:", error);
-    // Don't throw error here to prevent API failure if email fails
-  }
+  await transporter.sendMail({
+    from: `"TirePro Alerts" <${process.env.EMAIL_USER}>`,
+    to: "moraljero1234567890@gmail.com",
+    subject: `🚨 Alerta de Profundidad Baja — Placa ${plate}`,
+    html: emailBody,
+  });
 }
