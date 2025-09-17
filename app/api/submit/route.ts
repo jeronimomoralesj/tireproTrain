@@ -1,7 +1,7 @@
 import clientPromise from "@/lib/mongodb";
 import nodemailer from "nodemailer";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
-
+import type { IncomingMessage } from "http";
 type TirePayload = {
   plate: string;
   sendEmail?: boolean;
@@ -20,6 +20,8 @@ const s3 = new S3Client({
   },
 });
 
+
+
 export async function POST(req: Request) {
   try {
     const body: TirePayload = await req.json();
@@ -27,13 +29,16 @@ export async function POST(req: Request) {
 
     // Get client IP from headers or connection
     const forwardedFor = req.headers.get("x-forwarded-for");
+
+    // Use a narrow type assertion only for what we need
+    const nodeReq = req as Request & { socket?: IncomingMessage["socket"]; ip?: string };
+
     const realIp = forwardedFor
       ? forwardedFor.split(",")[0].trim()
-      : (req as any).socket?.remoteAddress || (req as any).ip || "Unknown";
+      : nodeReq.socket?.remoteAddress || nodeReq.ip || "Unknown";
 
     // Normalize IPv6 localhost (::1) to 127.0.0.1
     const ip = realIp === "::1" ? "127.0.0.1" : realIp;
-
 
     // 2️⃣ Upload each image to S3 and replace with URL
     const tiresWithS3Urls = await Promise.all(
