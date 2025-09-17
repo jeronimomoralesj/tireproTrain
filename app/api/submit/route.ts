@@ -1,6 +1,6 @@
 import clientPromise from "@/lib/mongodb";
 import nodemailer from "nodemailer";
-
+import type { Socket } from "net";
 type TirePayload = {
   plate: string;
   tires: {
@@ -16,7 +16,7 @@ export async function POST(req: Request) {
 
     // Get client IP
     const forwardedFor = req.headers.get("x-forwarded-for");
-    const nodeReq = req as Request & { socket?: any; ip?: string };
+    const nodeReq = req as Request & { socket?: Socket; ip?: string };
     const realIp = forwardedFor
       ? forwardedFor.split(",")[0].trim()
       : nodeReq.socket?.remoteAddress || nodeReq.ip || "Unknown";
