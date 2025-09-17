@@ -11,6 +11,7 @@ export default function Page() {
   ]);
   const [estado, setEstado] = useState<"exito" | "error" | "cargando" | "">("");
   const [mostrarPopup, setMostrarPopup] = useState(false);
+const [isSubmitting, setIsSubmitting] = useState(false);
 
   function handleAgregarLlantas() {
     setLlantas((prev) => [...prev, { images: [null, null, null], depths: ["", "", ""] }]);
@@ -25,55 +26,68 @@ export default function Page() {
   }
 
   function handleProfundidadCambio(indexLlantas: number, indexProf: number, valor: string) {
+  // Only allow empty string or positive numbers
+  if (valor === "" || (/^\d+(\.\d+)?$/.test(valor) && parseFloat(valor) >= 0)) {
     setLlantas((prev) => {
       const actualizadas = [...prev];
       actualizadas[indexLlantas].depths[indexProf] = valor;
       return actualizadas;
     });
   }
+}
 
   async function handleEnviarTodo(e: React.FormEvent) {
-    e.preventDefault();
+  e.preventDefault();
 
-    setEstado("cargando");
+  // ✅ Check if all three images are present for each tire
+  const faltanImagenes = llantas.some((llanta) =>
+    llanta.images.some((img) => img === null)
+  );
 
-    // Convertir imágenes a Base64 antes de enviar
-    const llantasConBase64 = await Promise.all(
-      llantas.map(async (llanta) => {
-        const imagenesBase64 = await Promise.all(
-          llanta.images.map(
-            (archivo) =>
-              new Promise<string | null>((resolve) => {
-                if (!archivo) return resolve(null);
-                const lector = new FileReader();
-                lector.readAsDataURL(archivo);
-                lector.onloadend = () => resolve(lector.result as string);
-              })
-          )
-        );
-        return { ...llanta, images: imagenesBase64 };
-      })
-    );
+  if (faltanImagenes) {
+    alert("Por favor sube las tres imágenes de cada llanta antes de continuar.");
+    return;
+  }
 
-    try {
-      const res = await fetch("/api/submit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plate: placa, tires: llantasConBase64 }),
-      });
+  setEstado("cargando");
 
-      const data = await res.json();
-      if (data.success) {
-        setEstado("exito");
-      } else {
-        setEstado("error");
-      }
-    } catch (err) {
+  // Convertir imágenes a Base64 antes de enviar
+  const llantasConBase64 = await Promise.all(
+    llantas.map(async (llanta) => {
+      const imagenesBase64 = await Promise.all(
+        llanta.images.map(
+          (archivo) =>
+            new Promise<string | null>((resolve) => {
+              if (!archivo) return resolve(null);
+              const lector = new FileReader();
+              lector.readAsDataURL(archivo);
+              lector.onloadend = () => resolve(lector.result as string);
+            })
+        )
+      );
+      return { ...llanta, images: imagenesBase64 };
+    })
+  );
+
+  try {
+    const res = await fetch("/api/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plate: placa, tires: llantasConBase64 }),
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      setEstado("exito");
+    } else {
       setEstado("error");
     }
-
-    setMostrarPopup(true);
+  } catch (err) {
+    setEstado("error");
   }
+
+  setMostrarPopup(true);
+}
 
   function handleNuevoFormulario() {
     setPlaca("");
@@ -89,7 +103,7 @@ export default function Page() {
         
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-light text-gray-800 tracking-wide">TirePro</h1>
+          <h1 className="text-3xl font-light text-gray-800 tracking-wide">Merquellantas</h1>
         </div>
 
         {/* Placa Step */}
@@ -158,6 +172,8 @@ export default function Page() {
                     <input
                       key={i}
                       type="number"
+                      min="0"
+                      inputMode="decimal"
                       placeholder="mm"
                       value={llanta.depths[i]}
                       onChange={(e) => handleProfundidadCambio(tIndex, i, e.target.value)}
@@ -177,12 +193,44 @@ export default function Page() {
               >
                 + Agregar Llanta
               </button>
-              <button 
-                type="submit" 
-                className="px-8 py-3 bg-blue-500 text-white rounded-full font-light hover:bg-blue-600 transition-colors"
-              >
-                Enviar Todo
-              </button>
+              <button
+                type="submit"
+                onClick={handleEnviarTodo}
+                disabled={estado === "cargando"}
+                className={`px-6 py-3 rounded-xl font-semibold text-white transition ${
+                  estado === "cargando"
+                    ? "bg-gray-400 cursor-not-allowed"
+                    : "bg-blue-600 hover:bg-blue-700"
+                }`}
+                >
+                {estado === "cargando" ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg
+                      className="animate-spin h-5 w-5 text-white"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                      ></path>
+                    </svg>
+                    Enviando...
+                  </span>
+                ) : (
+                  "Enviar Todo"
+                )}
+                </button>
             </div>
           </form>
         )}

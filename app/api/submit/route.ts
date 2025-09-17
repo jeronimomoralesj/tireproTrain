@@ -25,6 +25,16 @@ export async function POST(req: Request) {
     const body: TirePayload = await req.json();
     const { plate, tires } = body;
 
+    // Get client IP from headers or connection
+    const forwardedFor = req.headers.get("x-forwarded-for");
+    const realIp = forwardedFor
+      ? forwardedFor.split(",")[0].trim()
+      : (req as any).socket?.remoteAddress || (req as any).ip || "Unknown";
+
+    // Normalize IPv6 localhost (::1) to 127.0.0.1
+    const ip = realIp === "::1" ? "127.0.0.1" : realIp;
+
+
     // 2️⃣ Upload each image to S3 and replace with URL
     const tiresWithS3Urls = await Promise.all(
       tires.map(async (tire, tIndex) => {
@@ -63,10 +73,11 @@ export async function POST(req: Request) {
     const collection = db.collection("tires");
 
     // 4️⃣ Store each tire individually
-    const docs = tiresWithS3Urls.map((tire) => ({
+        const docs = tiresWithS3Urls.map((tire) => ({
       plate,
       images: tire.images,
       depths: tire.depths.map(Number),
+      ip, // <-- save user IP
       createdAt: new Date(),
     }));
 
