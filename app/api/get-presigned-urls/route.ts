@@ -14,7 +14,6 @@ export async function POST(req: Request) {
     const { plate, files }: { plate: string; files: { name: string; type: string }[] } =
       await req.json();
 
-    // Generate pre-signed URLs for each file
     const urls = await Promise.all(
       files.map(async (file, index) => {
         const key = `tires/${plate}/tire-${index + 1}-${Date.now()}-${file.name}`;
@@ -23,6 +22,7 @@ export async function POST(req: Request) {
           Key: key,
           ContentType: file.type,
         });
+
         const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 300 }); // 5 min
         return { uploadUrl, key };
       })

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.888.0",
+    "@aws-sdk/s3-request-presigner": "^3.890.0",
     "aws-sdk": "^2.1692.0",
     "mongodb": "^6.19.0",
     "next": "15.5.3",

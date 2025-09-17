@@ -36,7 +36,7 @@ const [isSubmitting, setIsSubmitting] = useState(false);
   }
 }
 
-  async function handleEnviarTodo(e: React.FormEvent) {
+async function handleEnviarTodo(e: React.FormEvent) {
   e.preventDefault();
 
   // ✅ Check if all three images are present for each tire
@@ -50,44 +50,59 @@ const [isSubmitting, setIsSubmitting] = useState(false);
   }
 
   setEstado("cargando");
-
-  // Convertir imágenes a Base64 antes de enviar
-  const llantasConBase64 = await Promise.all(
-    llantas.map(async (llanta) => {
-      const imagenesBase64 = await Promise.all(
-        llanta.images.map(
-          (archivo) =>
-            new Promise<string | null>((resolve) => {
-              if (!archivo) return resolve(null);
-              const lector = new FileReader();
-              lector.readAsDataURL(archivo);
-              lector.onloadend = () => resolve(lector.result as string);
-            })
-        )
-      );
-      return { ...llanta, images: imagenesBase64 };
-    })
-  );
+  setIsSubmitting(true);
 
   try {
-    const res = await fetch("/api/submit", {
+    // 1️⃣ Request pre-signed URLs from backend
+    const filesMeta = llantas.flatMap((llanta, tIndex) =>
+      llanta.images.map((file, imgIndex) => ({
+        name: `tire-${tIndex + 1}-${imgIndex + 1}-${file!.name}`,
+        type: file!.type,
+      }))
+    );
+
+    const presignRes = await fetch("/api/get-presigned-urls", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plate: placa, tires: llantasConBase64 }),
+      body: JSON.stringify({ plate: placa, files: filesMeta }),
     });
 
-    const data = await res.json();
-    if (data.success) {
-      setEstado("exito");
-    } else {
-      setEstado("error");
-    }
-  } catch (err) {
-    setEstado("error");
-  }
+    const { urls } = await presignRes.json();
 
-  setMostrarPopup(true);
+    // 2️⃣ Upload each file directly to S3
+    await Promise.all(
+      llantas.flatMap((llanta) => llanta.images).map((file, i) =>
+        fetch(urls[i].uploadUrl, {
+          method: "PUT",
+          body: file,
+          headers: { "Content-Type": file!.type },
+        })
+      )
+    );
+
+    // 3️⃣ Prepare tires data to send to /api/submit
+    const tiresData = llantas.map((llanta, tIndex) => ({
+      keys: llanta.images.map((_, imgIndex) => urls[tIndex * 3 + imgIndex].key),
+      depths: llanta.depths,
+    }));
+
+    // 4️⃣ Save to backend (MongoDB & email)
+    await fetch("/api/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plate: placa, tires: tiresData }),
+    });
+
+    setEstado("exito");
+  } catch (err) {
+    console.error(err);
+    setEstado("error");
+  } finally {
+    setIsSubmitting(false);
+    setMostrarPopup(true);
+  }
 }
+
 
   function handleNuevoFormulario() {
     setPlaca("");
@@ -140,7 +155,6 @@ const [isSubmitting, setIsSubmitting] = useState(false);
                 <div className="grid grid-cols-3 gap-4 mb-6">
                   {["Interna", "Centro", "Externa"].map((label, i) => (
                     <div key={i} className="text-center">
-                      <p className="text-sm text-gray-500 mb-3">{label}</p>
                       <label className="block cursor-pointer">
                         <div className="w-full h-32 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center hover:border-gray-300 transition-colors">
                           {llanta.images[i] ? (
@@ -153,6 +167,7 @@ const [isSubmitting, setIsSubmitting] = useState(false);
                             <span className="text-gray-400 text-sm">+ Foto</span>
                           )}
                         </div>
+                        <p className="text-sm text-gray-500 mb-3">{label}</p>
                         <input
                           type="file"
                           accept="image/*"

@@ -1,118 +1,60 @@
 import clientPromise from "@/lib/mongodb";
 import nodemailer from "nodemailer";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
-import type { IncomingMessage } from "http";
+
 type TirePayload = {
   plate: string;
-  sendEmail?: boolean;
   tires: {
-    images: (string | null)[];
+    keys: string[]; // S3 keys for each tire's images
     depths: string[];
   }[];
 };
-
-// 1️⃣ Setup AWS S3 client
-const s3 = new S3Client({
-  region: process.env.AWS_REGION!,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-  },
-});
-
-
 
 export async function POST(req: Request) {
   try {
     const body: TirePayload = await req.json();
     const { plate, tires } = body;
 
-    // Get client IP from headers or connection
+    // Get client IP
     const forwardedFor = req.headers.get("x-forwarded-for");
-
-    // Use a narrow type assertion only for what we need
-    const nodeReq = req as Request & { socket?: IncomingMessage["socket"]; ip?: string };
-
+    const nodeReq = req as Request & { socket?: any; ip?: string };
     const realIp = forwardedFor
       ? forwardedFor.split(",")[0].trim()
       : nodeReq.socket?.remoteAddress || nodeReq.ip || "Unknown";
-
-    // Normalize IPv6 localhost (::1) to 127.0.0.1
     const ip = realIp === "::1" ? "127.0.0.1" : realIp;
 
-    // 2️⃣ Upload each image to S3 and replace with URL
-    const tiresWithS3Urls = await Promise.all(
-      tires.map(async (tire, tIndex) => {
-        const s3Urls = await Promise.all(
-          tire.images.map(async (imgBase64, imgIndex) => {
-            if (!imgBase64) return null;
-
-            // Extract file type and data from Base64
-            const [meta, base64Data] = imgBase64.split(",");
-            const mimeType = meta.match(/data:(.*?);base64/)?.[1] || "image/png";
-            const buffer = Buffer.from(base64Data, "base64");
-
-            const key = `tires/${plate}/tire-${tIndex + 1}-${imgIndex + 1}-${Date.now()}.png`;
-
-            // ✅ Upload to S3 (no ACL)
-            await s3.send(
-              new PutObjectCommand({
-                Bucket: process.env.AWS_BUCKET_NAME!,
-                Key: key,
-                Body: buffer,
-                ContentType: mimeType,
-              })
-            );
-
-            return `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
-          })
-        );
-
-        return { ...tire, images: s3Urls };
-      })
-    );
-
-    // 3️⃣ Connect to MongoDB
-    const client = await clientPromise;
-    const db = client.db("tirepro-model");
-    const collection = db.collection("tires");
-
-    // 4️⃣ Store each tire individually
-        const docs = tiresWithS3Urls.map((tire) => ({
+    // Prepare MongoDB documents
+    const docs = tires.map((tire) => ({
       plate,
-      images: tire.images,
+      images: tire.keys.map(
+        (key) => `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`
+      ),
       depths: tire.depths.map(Number),
-      ip, // <-- save user IP
+      ip,
       createdAt: new Date(),
     }));
 
+    // Save to MongoDB
+    const client = await clientPromise;
+    const db = client.db("tirepro-model");
+    const collection = db.collection("tires");
     await collection.insertMany(docs);
 
-    // 5️⃣ Send email if at least one tire is low
-    const hasLowDepth = tiresWithS3Urls.some((tire) =>
-      tire.depths.some((d) => Number(d) <= 5)
-    );
-
+    // Check if low-depth alert is needed
+    const hasLowDepth = tires.some((tire) => tire.depths.some((d) => Number(d) <= 5));
     if (hasLowDepth) {
-      await sendLowDepthEmail(plate, tiresWithS3Urls);
+      await sendLowDepthEmail(plate, docs);
     }
 
-    return new Response(JSON.stringify({ success: true }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+    return new Response(JSON.stringify({ success: true }), { status: 200 });
   } catch (error) {
     console.error("Error saving tires:", error);
-    return new Response(JSON.stringify({ success: false, error: String(error) }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    return new Response(JSON.stringify({ success: false, error: String(error) }), { status: 500 });
   }
 }
 
 async function sendLowDepthEmail(
   plate: string,
-  tires: { images: (string | null)[]; depths: string[] }[]
+  tires: { images: string[]; depths: number[] }[]
 ) {
   const transporter = nodemailer.createTransport({
     service: "gmail",
@@ -122,21 +64,15 @@ async function sendLowDepthEmail(
     },
   });
 
-  // Build HTML table with all tires
   const tableRows = tires
     .map(
       (t, i) => `
       <tr>
-        <td style="padding: 6px; border: 1px solid #ddd;">Tire ${i + 1}</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">Llanta ${i + 1}</td>
         <td style="padding: 6px; border: 1px solid #ddd;">${t.depths.join(" mm, ")} mm</td>
         <td style="padding: 6px; border: 1px solid #ddd;">
           ${t.images
-            .map(
-              (img) =>
-                img
-                  ? `<a href="${img}" target="_blank">Ver Imagen</a>`
-                  : "No image"
-            )
+            .map((img) => `<a href="${img}" target="_blank">Ver Imagen</a>`)
             .join("<br/>")}
         </td>
       </tr>`
