@@ -153,8 +153,15 @@ async function handleEnviarTodo(e: React.FormEvent) {
 
                 {/* Images */}
                 <div className="grid grid-cols-3 gap-4 mb-6">
-                  {["Interna", "Centro", "Externa"].map((label, i) => (
+                  {[
+                    { angle: "45°", label: "Interna" },
+                    { angle: "Centro", label: "Centro" },
+                    { angle: "90°", label: "Externa" }
+                  ].map(({ angle, label }, i) => (
                     <div key={i} className="text-center">
+                      <div className="mb-2">
+                        <p className="text-sm font-medium text-gray-700 mb-1">{angle}</p>
+                      </div>
                       <label className="block cursor-pointer">
                         <div className="w-full h-32 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center hover:border-gray-300 transition-colors">
                           {llanta.images[i] ? (
@@ -167,7 +174,7 @@ async function handleEnviarTodo(e: React.FormEvent) {
                             <span className="text-gray-400 text-sm">+ Foto</span>
                           )}
                         </div>
-                        <p className="text-sm text-gray-500 mb-3">{label}</p>
+                        <p className="text-sm text-gray-500 mt-2 mb-3">{label}</p>
                         <input
                           type="file"
                           accept="image/*"
