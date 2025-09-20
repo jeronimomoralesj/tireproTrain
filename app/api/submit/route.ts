@@ -1,18 +1,58 @@
 import clientPromise from "@/lib/mongodb";
-import nodemailer from "nodemailer";
+import * as nodemailer from "nodemailer";
 import type { Socket } from "net";
+
 type TirePayload = {
   plate: string;
   tires: {
     keys: string[]; // S3 keys for each tire's images
     depths: string[];
+    position: string; // New field for tire position
   }[];
 };
 
 export async function POST(req: Request) {
   try {
-    const body: TirePayload = await req.json();
+    // Parse and validate request body
+    let body: TirePayload;
+    try {
+      body = await req.json();
+    } catch (parseError) {
+      console.error("JSON parse error:", parseError);
+      return new Response(
+        JSON.stringify({ success: false, error: "Invalid JSON in request body" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     const { plate, tires } = body;
+    console.log("Received data:", { plate, tiresCount: tires?.length });
+
+    // Validate required fields
+    if (!plate || !tires || !Array.isArray(tires) || tires.length === 0) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Missing required fields: plate and tires array" }), 
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate each tire has required fields
+    const invalidTires = tires.filter(tire => 
+      !tire.position?.trim() || 
+      !Array.isArray(tire.keys) || 
+      !Array.isArray(tire.depths) ||
+      tire.keys.length === 0
+    );
+    
+    if (invalidTires.length > 0) {
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: `Invalid tire data found. Each tire must have position, keys array, and depths array.` 
+        }), 
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
     // Get client IP
     const forwardedFor = req.headers.get("x-forwarded-for");
@@ -22,87 +62,196 @@ export async function POST(req: Request) {
       : nodeReq.socket?.remoteAddress || nodeReq.ip || "Unknown";
     const ip = realIp === "::1" ? "127.0.0.1" : realIp;
 
-    // Prepare MongoDB documents
-    const docs = tires.map((tire) => ({
-      plate,
-      images: tire.keys.map(
-        (key) => `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`
-      ),
-      depths: tire.depths.map(Number),
-      ip,
-      createdAt: new Date(),
-    }));
+    // Prepare MongoDB documents with position
+    const docs = tires.map((tire, index) => {
+      // Ensure we have valid image URLs
+      const imageUrls = tire.keys
+        .filter(key => key && key.trim())
+        .map(key => `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`);
 
-    // Save to MongoDB
-    const client = await clientPromise;
-    const db = client.db("tirepro-model");
-    const collection = db.collection("tires");
-    await collection.insertMany(docs);
+      // Process depths - handle empty strings and invalid numbers
+      const processedDepths = tire.depths
+        .map(d => {
+          if (typeof d === 'string') d = d.trim();
+          if (d === '' || d === null || d === undefined) return 0;
+          const num = Number(d);
+          return isNaN(num) ? 0 : Math.max(0, num); // Ensure non-negative
+        });
 
-    // Check if low-depth alert is needed
-    const hasLowDepth = tires.some((tire) => tire.depths.some((d) => Number(d) <= 5));
-    if (hasLowDepth) {
-      await sendLowDepthEmail(plate, docs);
+      return {
+        plate: plate.trim(),
+        position: tire.position.trim(),
+        images: imageUrls,
+        depths: processedDepths,
+        ip,
+        createdAt: new Date(),
+        tireIndex: index + 1,
+      };
+    });
+
+    // Save to MongoDB with error handling
+    let client;
+    let insertResult;
+    
+    try {
+      client = await clientPromise;
+      const db = client.db("tirepro-model");
+      const collection = db.collection("tires");
+      
+      console.log(`Attempting to insert ${docs.length} documents for plate ${plate}`);
+      insertResult = await collection.insertMany(docs);
+      
+      if (!insertResult.acknowledged) {
+        throw new Error("MongoDB insert was not acknowledged");
+      }
+      
+      console.log(`Successfully inserted ${insertResult.insertedCount} documents`);
+    } catch (dbError) {
+      console.error("MongoDB error:", dbError);
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: `Database error: ${dbError instanceof Error ? dbError.message : 'Unknown database error'}`
+        }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
     }
 
-    return new Response(JSON.stringify({ success: true }), { status: 200 });
+    // Check if low-depth alert is needed (asynchronously)
+    const hasLowDepth = tires.some((tire) => 
+      tire.depths.some((d) => {
+        const depth = Number(d);
+        return !isNaN(depth) && depth <= 5;
+      })
+    );
+    
+    if (hasLowDepth) {
+      // Send email asynchronously to avoid blocking the response
+      sendLowDepthEmail(plate, docs).catch(error => {
+        console.error("Error sending low depth email:", error);
+      });
+    }
+
+    return new Response(
+      JSON.stringify({ 
+        success: true, 
+        message: `Successfully saved ${docs.length} tire inspections for plate ${plate}`,
+        tiresProcessed: docs.length
+      }), 
+      { 
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }
+    );
+
   } catch (error) {
     console.error("Error saving tires:", error);
-    return new Response(JSON.stringify({ success: false, error: String(error) }), { status: 500 });
+    return new Response(
+      JSON.stringify({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Unknown error occurred"
+      }), 
+      { 
+        status: 500,
+        headers: { "Content-Type": "application/json" }
+      }
+    );
   }
 }
 
 async function sendLowDepthEmail(
   plate: string,
-  tires: { images: string[]; depths: number[] }[]
+  tires: { position: string; images: string[]; depths: number[]; tireIndex: number }[]
 ) {
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
+  try {
+    // Validate environment variables first
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      console.warn("Email credentials not configured. Skipping email notification.");
+      return;
+    }
 
-  const tableRows = tires
-    .map(
-      (t, i) => `
-      <tr>
-        <td style="padding: 6px; border: 1px solid #ddd;">Llanta ${i + 1}</td>
-        <td style="padding: 6px; border: 1px solid #ddd;">${t.depths.join(" mm, ")} mm</td>
-        <td style="padding: 6px; border: 1px solid #ddd;">
-          ${t.images
-            .map((img) => `<a href="${img}" target="_blank">Ver Imagen</a>`)
-            .join("<br/>")}
-        </td>
-      </tr>`
-    )
-    .join("");
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
 
-  const emailBody = `
-    <h2>🚨 Alerta de Profundidad Baja</h2>
-    <p><b>Placa:</b> ${plate}</p>
-    <table style="border-collapse: collapse; width: 100%; margin-top: 12px;">
-      <thead>
-        <tr style="background: #f0f0f0;">
-          <th style="padding: 6px; border: 1px solid #ddd;">Llanta</th>
-          <th style="padding: 6px; border: 1px solid #ddd;">Profundidades</th>
-          <th style="padding: 6px; border: 1px solid #ddd;">Imágenes</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${tableRows}
-      </tbody>
-    </table>
-    <p style="margin-top: 16px; font-size: 12px; color: #555;">
-      ⚠️ Esta alerta se genera porque al menos una de las profundidades es ≤ 5 mm.
-    </p>
-  `;
+    // Only include tires with low depth in the email
+    const lowDepthTires = tires.filter(tire => 
+      tire.depths.some(depth => depth <= 5)
+    );
 
-  await transporter.sendMail({
-    from: `"TirePro Alerts" <${process.env.EMAIL_USER}>`,
-    to: "moraljero1234567890@gmail.com",
-    subject: `🚨 Alerta de Profundidad Baja — Placa ${plate}`,
-    html: emailBody,
-  });
+    const tableRows = lowDepthTires
+      .map(
+        (t) => `
+        <tr>
+          <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">
+            Llanta ${t.tireIndex} - ${t.position}
+          </td>
+          <td style="padding: 8px; border: 1px solid #ddd;">
+            ${t.depths.map(d => `${d} mm`).join(", ")}
+          </td>
+          <td style="padding: 8px; border: 1px solid #ddd;">
+            ${t.images
+              .map((img, idx) => {
+                const labels = ["Interna", "Centro", "Externa"];
+                return `<a href="${img}" target="_blank" style="color: #0066cc; text-decoration: none;">${labels[idx]}</a>`;
+              })
+              .join(" | ")}
+          </td>
+        </tr>`
+      )
+      .join("");
+
+    const emailBody = `
+      <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
+        <h2 style="color: #dc3545; border-bottom: 2px solid #dc3545; padding-bottom: 10px;">
+          🚨 Alerta de Profundidad Baja
+        </h2>
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+          <p style="margin: 0;"><strong>Placa del Vehículo:</strong> ${plate}</p>
+          <p style="margin: 5px 0 0 0;"><strong>Número de llantas con alerta:</strong> ${lowDepthTires.length}</p>
+          <p style="margin: 5px 0 0 0;"><strong>Fecha de inspección:</strong> ${new Date().toLocaleString('es-CO')}</p>
+        </div>
+        
+        <table style="border-collapse: collapse; width: 100%; margin-top: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+          <thead>
+            <tr style="background: #dc3545; color: white;">
+              <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Llanta y Posición</th>
+              <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Profundidades</th>
+              <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Imágenes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+        
+        <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 5px; margin-top: 20px;">
+          <p style="margin: 0; color: #856404;">
+            ⚠️ <strong>Criterio de Alerta:</strong> Esta alerta se genera automáticamente cuando al menos una de las profundidades es ≤ 5 mm.
+          </p>
+        </div>
+        
+        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e9ecef; font-size: 12px; color: #6c757d;">
+          <p style="margin: 0;">Sistema TirePro - Monitoreo Automático de Llantas</p>
+          <p style="margin: 5px 0 0 0;">Generado automáticamente el ${new Date().toLocaleString('es-CO')}</p>
+        </div>
+      </div>
+    `;
+
+    await transporter.sendMail({
+      from: `"TirePro Alerts" <${process.env.EMAIL_USER}>`,
+      to: "moraljero1234567890@gmail.com",
+      subject: `🚨 URGENTE: ${lowDepthTires.length} Llanta(s) con Profundidad Crítica — Placa ${plate}`,
+      html: emailBody,
+    });
+
+    console.log(`Low depth alert email sent successfully for plate ${plate}`);
+  } catch (error) {
+    console.error("Failed to send low depth email:", error);
+    throw error;
+  }
 }
