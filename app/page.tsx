@@ -357,9 +357,8 @@ export default function Page() {
                 {/* Depths */}
                 <div className="grid grid-cols-3 gap-4">
                   {["Interna", "Centro", "Externa"].map((label, i) => (
-                    <div>
-                    <input
-                      key={i}
+                    <div key={i}>
+                      <input
                       type="number"
                       min="0"
                       inputMode="decimal"
@@ -367,8 +366,8 @@ export default function Page() {
                       value={llanta.depths[i]}
                       onChange={(e) => handleProfundidadCambio(tIndex, i, e.target.value)}
                       className="text-center p-3 border-0 border-b border-gray-200 focus:border-blue-500 focus:outline-none bg-gray-50 rounded-t-lg text-black"
-                    />
-                    <p className="text-gray-700 font-xs">{label}</p>
+                      />
+                      <p className="text-gray-700 font-xs">{label}</p>
                     </div>
                   ))}
                 </div>
