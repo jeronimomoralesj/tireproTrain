@@ -276,7 +276,7 @@ export default function Page() {
                     Posición de la llanta
                   </label>
                   <input
-                    type="text"
+                    type="number"
                     placeholder="Ej: Delantera Izquierda, Trasera Derecha, Repuesto, etc."
                     value={llanta.position}
                     onChange={(e) => handlePositionCambio(tIndex, e.target.value)}
@@ -285,22 +285,23 @@ export default function Page() {
                 </div>
 
                 {/* Images */}
+                <h2 className="text-gray-700 mb-2">Imagenes: </h2>
                 <div className="grid grid-cols-3 gap-4 mb-6">
                   {[
                     { 
-                      angle: "45°", 
+                      angle: "costado y banda", 
                       label: "Interna",
-                      example: "https://tirepro-train.s3.us-east-1.amazonaws.com/tires/JVL266/tire-19-1758297694743-tire-7-1-1000001379.jpg"
+                      example: "https://tirepro-train.s3.us-east-1.amazonaws.com/tires/GYY909/tire-1-1758295642410-tire-1-1-1000001352.jpg"
                     },
                     { 
-                      angle: "Centro", 
+                      angle: "banda", 
                       label: "Centro",
                       example: "https://tirepro-train.s3.us-east-1.amazonaws.com/tires/GYY909/tire-2-1758295642410-tire-1-2-1000001342.jpg"
                     },
                     { 
-                      angle: "90°", 
+                      angle: "costado", 
                       label: "Externa",
-                      example: "https://tirepro-train.s3.us-east-1.amazonaws.com/tires/GYY909/tire-1-1758295642410-tire-1-1-1000001352.jpg"
+                      example: "https://tirepro-train.s3.us-east-1.amazonaws.com/tires/GYY909/tire-6-1758295642411-tire-2-3-1000001356.jpg"
                     }
                   ].map(({ angle, label, example }, i) => (
                     <div key={i} className="text-center">
@@ -320,7 +321,6 @@ export default function Page() {
                             <span className="text-gray-400 text-sm">+ Foto</span>
                           )}
                         </div>
-                        <p className="text-sm text-gray-500 mt-2 mb-2">{label}</p>
                         <input
                           type="file"
                           accept="image/*"
@@ -352,9 +352,12 @@ export default function Page() {
                   ))}
                 </div>
 
+                <h2 className="text-gray-700 mb-2">Profundidades: </h2>
+
                 {/* Depths */}
                 <div className="grid grid-cols-3 gap-4">
                   {["Interna", "Centro", "Externa"].map((label, i) => (
+                    <div>
                     <input
                       key={i}
                       type="number"
@@ -365,6 +368,8 @@ export default function Page() {
                       onChange={(e) => handleProfundidadCambio(tIndex, i, e.target.value)}
                       className="text-center p-3 border-0 border-b border-gray-200 focus:border-blue-500 focus:outline-none bg-gray-50 rounded-t-lg text-black"
                     />
+                    <p className="text-gray-700 font-xs">{label}</p>
+                    </div>
                   ))}
                 </div>
               </div>
