@@ -303,8 +303,8 @@ export default function Page() {
                     Posición de la llanta
                   </label>
                   <input
-                    type="text"
-                    placeholder="Ej: Delantera Izquierda, Trasera Derecha, Repuesto, etc."
+                    type="number"
+                    placeholder="Ej: 1"
                     value={llanta.position}
                     onChange={(e) => handlePositionCambio(tIndex, e.target.value)}
                     className="w-full p-3 sm:p-4 border border-gray-200 rounded-xl sm:rounded-2xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none text-black transition-all text-sm sm:text-base"
