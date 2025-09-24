@@ -108,16 +108,6 @@ export default function Page() {
   async function handleEnviarTodo(e: React.FormEvent) {
     e.preventDefault();
 
-    // Validation checks
-    const faltanImagenes = llantas.some((llanta) =>
-      llanta.images.some((img) => img === null)
-    );
-
-    if (faltanImagenes) {
-      alert("Por favor sube las tres imágenes de cada llanta antes de continuar.");
-      return;
-    }
-
     const faltanPosiciones = llantas.some((llanta) => !llanta.position.trim());
     
     if (faltanPosiciones) {
@@ -145,11 +135,19 @@ export default function Page() {
     try {
       // 1️⃣ Request pre-signed URLs from backend
       const filesMeta = llantas.flatMap((llanta, tIndex) =>
-        llanta.images.map((file, imgIndex) => ({
-          name: `tire-${tIndex + 1}-${imgIndex + 1}-${Date.now()}-${file!.name}`,
-          type: file!.type,
-        }))
-      );
+      llanta.images
+        .map((file, imgIndex) =>
+          file
+            ? {
+                name: `tire-${tIndex + 1}-${imgIndex + 1}-${Date.now()}-${file.name}`,
+                type: file.type,
+                tIndex,
+                imgIndex,
+              }
+            : null
+        )
+        .filter(Boolean) as { name: string; type: string; tIndex: number; imgIndex: number }[]
+    );
 
       const presignRes = await fetch("/api/get-presigned-urls", {
         method: "POST",
@@ -164,8 +162,11 @@ export default function Page() {
       const { urls } = await presignRes.json();
 
       // 2️⃣ Upload files in optimized batches
-      const allFiles = llantas.flatMap((llanta) => llanta.images) as File[];
-      const uploadResults = await uploadInBatches(allFiles, urls, 6);
+      const allFiles = llantas.flatMap((llanta) =>
+      llanta.images.filter((f): f is File => f !== null)
+    );
+
+    const uploadResults = await uploadInBatches(allFiles, urls, 6);
       
       // Check for upload failures
       const failedUploads = uploadResults.filter(result => !result.success);
@@ -175,7 +176,9 @@ export default function Page() {
 
       // 3️⃣ Prepare tires data to send to /api/submit
       const tiresData = llantas.map((llanta, tIndex) => ({
-        keys: llanta.images.map((_, imgIndex) => urls[tIndex * 3 + imgIndex].key),
+        keys: filesMeta
+      .filter((meta) => meta.tIndex === tIndex)
+      .map((meta, i) => urls[i].key),
         depths: llanta.depths.filter(d => d.trim() !== ""), // Remove empty depths
         position: llanta.position.trim(),
       }));

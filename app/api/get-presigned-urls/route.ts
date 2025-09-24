@@ -15,12 +15,26 @@ export async function POST(req: Request) {
       await req.json();
 
     // Validate inputs
-    if (!plate || !files || files.length === 0) {
-      return new Response(
-        JSON.stringify({ success: false, error: "Missing plate or files" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
+    // Validate inputs
+if (!plate) {
+  return new Response(
+    JSON.stringify({ success: false, error: "Missing plate" }),
+    { status: 400, headers: { "Content-Type": "application/json" } }
+  );
+}
+
+// If no files were uploaded, just return success with empty list
+if (!files || files.length === 0) {
+  return new Response(
+    JSON.stringify({
+      success: true,
+      urls: [],
+      message: "No files uploaded, skipping presigned URL generation",
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
+}
+
 
     if (files.length > 60) { // Max 20 tires * 3 images each
       return new Response(

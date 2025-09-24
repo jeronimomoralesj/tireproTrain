@@ -37,22 +37,23 @@ export async function POST(req: Request) {
     }
 
     // Validate each tire has required fields
-    const invalidTires = tires.filter(tire => 
-      !tire.position?.trim() || 
-      !Array.isArray(tire.keys) || 
-      !Array.isArray(tire.depths) ||
-      tire.keys.length === 0
-    );
-    
-    if (invalidTires.length > 0) {
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: `Invalid tire data found. Each tire must have position, keys array, and depths array.` 
-        }), 
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
+    // Validate each tire has required fields
+const invalidTires = tires.filter(tire => 
+  !tire.position?.trim() || 
+  !Array.isArray(tire.keys) || 
+  !Array.isArray(tire.depths)
+);
+
+if (invalidTires.length > 0) {
+  return new Response(
+    JSON.stringify({ 
+      success: false, 
+      error: `Invalid tire data found. Each tire must have position, keys array (can be empty), and depths array.` 
+    }), 
+    { status: 400, headers: { "Content-Type": "application/json" } }
+  );
+}
+
 
     // Get client IP
     const forwardedFor = req.headers.get("x-forwarded-for");
