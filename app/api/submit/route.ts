@@ -35,9 +35,6 @@ export async function POST(req: Request) {
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
-
-    // Validate each tire has required fields
-    // Validate each tire has required fields
 const invalidTires = tires.filter(tire => 
   !tire.position?.trim() || 
   !Array.isArray(tire.keys) || 

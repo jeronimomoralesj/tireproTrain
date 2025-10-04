@@ -355,15 +355,17 @@ export default function Page() {
                             ) : (
                               <div className="text-center">
                                 <svg className="w-8 h-8 sm:w-10 sm:h-10 text-gray-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path>
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
                                 </svg>
-                                <span className="text-gray-400 text-xs sm:text-sm font-medium">Foto</span>
+                                <span className="text-gray-400 text-xs sm:text-sm font-medium">Tomar Foto</span>
                               </div>
                             )}
                           </div>
                           <input
                             type="file"
                             accept="image/*"
+                            capture="environment"
                             onChange={(e) =>
                               handleImagenCambio(tIndex, i, e.target.files?.[0] || null)
                             }
