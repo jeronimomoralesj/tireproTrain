@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 type Inspection = {
   _id: string;
   plate: string;
+  position: string;
   images: string[];
   depths: number[];
   ip: string;
@@ -108,6 +109,7 @@ export default function DashboardPage() {
                     <div className="flex justify-between items-center">
                       <div>
                         <h3 className="text-white font-bold text-lg">Placa: {insp.plate}</h3>
+                        <h3 className="text-white font-bold text-lg">Posición: {insp.position}</h3>
                         <p className="text-blue-100 text-sm">
                           {new Date(insp.createdAt).toLocaleTimeString()}
                         </p>
