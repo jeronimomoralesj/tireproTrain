@@ -106,35 +106,34 @@ export default function Page() {
   }
 
   async function handleEnviarTodo(e: React.FormEvent) {
-    e.preventDefault();
+  e.preventDefault();
 
-    const faltanPosiciones = llantas.some((llanta) => !llanta.position.trim());
-    
-    if (faltanPosiciones) {
-      alert("Por favor especifica la posición de cada llanta antes de continuar.");
-      return;
-    }
+  const faltanPosiciones = llantas.some((llanta) => !llanta.position.trim());
+  
+  if (faltanPosiciones) {
+    alert("Por favor especifica la posición de cada llanta antes de continuar.");
+    return;
+  }
 
-    // Validate that we have at least some depth measurements
-    const faltanProfundidades = llantas.some((llanta) => 
-      llanta.depths.every(depth => !depth.trim())
-    );
-    
-    if (faltanProfundidades) {
-      alert("Por favor ingresa al menos una medida de profundidad para cada llanta.");
-      return;
-    }
+  const faltanProfundidades = llantas.some((llanta) => 
+    llanta.depths.every(depth => !depth.trim())
+  );
+  
+  if (faltanProfundidades) {
+    alert("Por favor ingresa al menos una medida de profundidad para cada llanta.");
+    return;
+  }
 
-    setEstado("cargando");
-    setIsSubmitting(true);
-    setMostrarPopup(true);
-    
-    const totalFiles = llantas.length * 3;
-    setUploadProgress({ current: 0, total: totalFiles });
+  setEstado("cargando");
+  setIsSubmitting(true);
+  setMostrarPopup(true);
+  
+  const totalFiles = llantas.length * 3;
+  setUploadProgress({ current: 0, total: totalFiles });
 
-    try {
-      // 1️⃣ Request pre-signed URLs from backend
-      const filesMeta = llantas.flatMap((llanta, tIndex) =>
+  try {
+    // 1️⃣ Request pre-signed URLs from backend
+    const filesMeta = llantas.flatMap((llanta, tIndex) =>
       llanta.images
         .map((file, imgIndex) =>
           file
@@ -149,64 +148,70 @@ export default function Page() {
         .filter(Boolean) as { name: string; type: string; tIndex: number; imgIndex: number }[]
     );
 
-      const presignRes = await fetch("/api/get-presigned-urls", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plate: placa, files: filesMeta }),
-      });
+    const presignRes = await fetch("/api/get-presigned-urls", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plate: placa, files: filesMeta }),
+    });
 
-      if (!presignRes.ok) {
-        throw new Error("Failed to get pre-signed URLs");
-      }
+    if (!presignRes.ok) {
+      throw new Error("Failed to get pre-signed URLs");
+    }
 
-      const { urls } = await presignRes.json();
+    const { urls } = await presignRes.json();
 
-      // 2️⃣ Upload files in optimized batches
-      const allFiles = llantas.flatMap((llanta) =>
+    // 2️⃣ Upload files in optimized batches
+    const allFiles = llantas.flatMap((llanta) =>
       llanta.images.filter((f): f is File => f !== null)
     );
 
     const uploadResults = await uploadInBatches(allFiles, urls, 6);
-      
-      // Check for upload failures
-      const failedUploads = uploadResults.filter(result => !result.success);
-      if (failedUploads.length > 0) {
-        throw new Error(`Failed to upload ${failedUploads.length} files`);
-      }
-
-      // 3️⃣ Prepare tires data to send to /api/submit
-      const tiresData = llantas.map((llanta, tIndex) => ({
-        keys: filesMeta
-      .filter((meta) => meta.tIndex === tIndex)
-      .map((meta, i) => urls[i].key),
-        depths: llanta.depths.filter(d => d.trim() !== ""), // Remove empty depths
-        position: llanta.position.trim(),
-      }));
-
-      console.log("Sending data to backend:", { plate: placa, tires: tiresData });
-
-      // 4️⃣ Save to backend (MongoDB & email)
-      const submitRes = await fetch("/api/submit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plate: placa, tires: tiresData }),
-      });
-
-      const submitData = await submitRes.json();
-      console.log("Backend response:", submitData);
-
-      if (!submitRes.ok) {
-        throw new Error(submitData.error || "Failed to submit data to backend");
-      }
-
-      setEstado("exito");
-    } catch (err) {
-      console.error("Submission error:", err);
-      setEstado("error");
-    } finally {
-      setIsSubmitting(false);
+    
+    const failedUploads = uploadResults.filter(result => !result.success);
+    if (failedUploads.length > 0) {
+      throw new Error(`Failed to upload ${failedUploads.length} files`);
     }
+
+    // 3️⃣ Prepare tires data to send to /api/submit
+    // ✅ FIXED: Create a map from tIndex to the correct URL indices
+    const tiresData = llantas.map((llanta, tIndex) => {
+      // Find all the URLs that belong to this tire
+      const tireUrls = filesMeta
+        .map((meta, originalIndex) => ({ meta, originalIndex }))
+        .filter(({ meta }) => meta.tIndex === tIndex)
+        .map(({ originalIndex }) => urls[originalIndex].key);
+
+      return {
+        keys: tireUrls,
+        depths: llanta.depths.filter(d => d.trim() !== ""),
+        position: llanta.position.trim(),
+      };
+    });
+
+    console.log("Sending data to backend:", { plate: placa, tires: tiresData });
+
+    // 4️⃣ Save to backend (MongoDB & email)
+    const submitRes = await fetch("/api/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plate: placa, tires: tiresData }),
+    });
+
+    const submitData = await submitRes.json();
+    console.log("Backend response:", submitData);
+
+    if (!submitRes.ok) {
+      throw new Error(submitData.error || "Failed to submit data to backend");
+    }
+
+    setEstado("exito");
+  } catch (err) {
+    console.error("Submission error:", err);
+    setEstado("error");
+  } finally {
+    setIsSubmitting(false);
   }
+}
 
   function handleRetrySubmit() {
     setMostrarPopup(false);
